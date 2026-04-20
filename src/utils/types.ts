@@ -10,3 +10,8 @@ export interface ChatStreamChunk{
     finish_reason:string|null;
 }>
 }
+
+export interface ChatMessage{
+    role:'system'|'user'|'assistant';
+    content:string
+}

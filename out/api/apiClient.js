@@ -21,40 +21,66 @@ const PROVIDER_CONFIGS = {
 };
 class ApiClient {
     outputChannel;
+    pendingRequest = null;
     constructor(outputChannel) {
         this.outputChannel = outputChannel;
     }
     getActiveProvider() {
         const config = (0, configurationService_1.getConfig)();
         if (config.openrouterApiKey)
-            return 'openrouter';
+            return "openrouter";
         if (config.groqApiKey)
-            return 'groq';
+            return "groq";
         if (config.fireworksApiKey)
-            return 'fireworks';
+            return "fireworks";
         return null;
     }
-    async complete(message, options = {}) {
+    async complete(message) {
+        const provider = this.getActiveProvider();
+        if (!provider) {
+            throw new Error("No API key is configured");
+        }
+        this.cancel();
+        this.pendingRequest = new AbortController();
+        const configService = (0, configurationService_1.getConfig)();
+        const maxTokens = configService.maxTokens;
+        const providerConfig = PROVIDER_CONFIGS[provider];
+        const model = providerConfig.getModel();
+        const body = {
+            model,
+            message,
+            max_tokens: maxTokens,
+            stream: true,
+            temperature: 0.1,
+        };
+        this.log(`[${provider}] Request:model=${body.model}, max_tokkens=${maxTokens}`);
+        return this.streamRequest(providerConfig.endpoint, body, providerConfig.getApiKey(), this.pendingRequest.signal);
+    }
+    cancel() {
+        if (this.pendingRequest) {
+            this.pendingRequest.abort();
+            this.pendingRequest = null;
+        }
     }
     async *streamRequest(endpoint, body, apiKey, signal) {
         const response = await fetch(endpoint, {
-            method: 'POST',
+            method: "POST",
             headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json'
+                Authorization: `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
             },
-            body: JSON.stringify(body)
+            body: JSON.stringify(body),
         });
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(`API error ${response.status}: ${errorText}`);
         }
         if (!response.body) {
-            throw new Error('No response body');
+            throw new Error("No response body");
         }
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let buffer = '';
+        let buffer = "";
         try {
             while (true) {
                 const { done, value } = await reader.read();
@@ -62,12 +88,12 @@ class ApiClient {
                     break;
                 }
                 buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
                 for (const line of lines) {
-                    if (line.startsWith('data: ')) {
+                    if (line.startsWith("data: ")) {
                         const data = line.slice(6);
-                        if (data === '[DONE]') {
+                        if (data === "[DONE]") {
                             return;
                         }
                         try {

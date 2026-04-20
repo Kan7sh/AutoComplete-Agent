@@ -35,22 +35,53 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.InineCompletionProvider = void 0;
 const vscode = __importStar(require("vscode"));
+const apiClient_1 = require("../api/apiClient");
 class InineCompletionProvider {
     outputChannel;
+    apiClient;
     constructor(outputChannel) {
         this.outputChannel = outputChannel;
+        this.apiClient = new apiClient_1.ApiClient(outputChannel);
     }
     async provideInlineCompletionItems(document, position, _context, token) {
         try {
             const prefix = document.getText(new vscode.Range(new vscode.Position(0, 0), position));
             this.log(`provideInlineCompletionItems called t ${position.line}:${position.character}`);
-            const newItem = new vscode.InlineCompletionItem(prefix + '!');
+            let completion = "";
+            try {
+                completion = await this.callCompletionAPI([
+                    {
+                        role: "system",
+                        content: "Complete the code. Output ONLY the completion, not explanation.",
+                    },
+                    { role: "user", content: prefix },
+                ], token);
+            }
+            catch (error) { }
+            const newItem = new vscode.InlineCompletionItem(completion);
             return { items: [newItem] };
         }
         catch (error) {
             this.log(`Unexpected error ${error}`);
             return null;
         }
+    }
+    async callCompletionAPI(messages, token) {
+        let result = "";
+        try {
+            const generator = await this.apiClient.complete(messages);
+            for await (const chunk of generator) {
+                if (token.isCancellationRequested) {
+                    this.apiClient.cancel();
+                    break;
+                }
+                result += chunk;
+            }
+        }
+        catch (error) {
+            this.log(`API Error: ${error}`);
+        }
+        return result;
     }
     log(message) {
         this.outputChannel.appendLine(`[Provider] ${message}`);
