@@ -1,12 +1,14 @@
 import * as vscode from "vscode";
 import { ApiClient } from "../api/apiClient";
-import { ChatMessage } from "../utils/types";
+import { ChatMessage, PendingCompletion } from "../utils/types";
 
 export class InineCompletionProvider
   implements vscode.InlineCompletionItemProvider
 {
   private readonly outputChannel: vscode.OutputChannel;
   private readonly apiClient: ApiClient;
+  private pendingCompletion: PendingCompletion | null = null;
+
   constructor(outputChannel: vscode.OutputChannel) {
     this.outputChannel = outputChannel;
     this.apiClient = new ApiClient(outputChannel);
@@ -18,6 +20,7 @@ export class InineCompletionProvider
     token: vscode.CancellationToken,
   ): Promise<vscode.InlineCompletionList | null> {
     try {
+      this.handleExistingPendingCompletion();
       const prefix = document.getText(
         new vscode.Range(new vscode.Position(0, 0), position),
       );
@@ -37,13 +40,40 @@ export class InineCompletionProvider
           ],
           token,
         );
-      } catch (error) {}
+      } catch (error) {
+        this.log(`API error ${error}`);
+        return null;
+      }
 
+      this.pendingCompletion = {
+        documentUri:document.uri.toString(),
+        edit:{
+          startPosition:position,
+          insertText:completion,
+
+        }
+      }
       const newItem = new vscode.InlineCompletionItem(completion);
       return { items: [newItem] };
     } catch (error) {
       this.log(`Unexpected error ${error}`);
       return null;
+    }
+  }
+
+  private handleExistingPendingCompletion(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+  ): vscode.InlineCompletionList | null | undefined {
+    if (!this.pendingCompletion) {
+      return undefined;
+    }
+
+    const pendingPosition = this.pendingCompletion.edit.startPosition;
+    const pendingUri = this.pendingCompletion.documentUri;
+
+    if (document.uri.toString()!==pendingUri) {
+      
     }
   }
 

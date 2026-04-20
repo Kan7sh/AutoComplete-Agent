@@ -45,7 +45,7 @@ export class ApiClient implements vscode.Disposable {
   }
 
   async complete(
-    message: ChatMessage[],
+    messages: ChatMessage[],
   ): Promise<AsyncGenerator<string, void, unknown>> {
     const provider = this.getActiveProvider();
     if (!provider) {
@@ -61,14 +61,14 @@ export class ApiClient implements vscode.Disposable {
     const model = providerConfig.getModel();
     const body: Record<string, unknown> = {
       model,
-      message,
+      messages,
       max_tokens: maxTokens,
       stream: true,
       temperature: 0.1,
     };
 
     this.log(
-      `[${provider}] Request:model=${body.model}, max_tokkens=${maxTokens}`,
+      `[${provider}] Request:model=${body.model}, max_tokens=${maxTokens}`,
     );
 
     return this.streamRequest(
@@ -93,23 +93,22 @@ export class ApiClient implements vscode.Disposable {
     signal: AbortSignal,
   ): AsyncGenerator<string, void, unknown> {
     const response = await fetch(endpoint, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+            body: JSON.stringify(body),
+            signal
     });
-
     if (!response.ok) {
+
       const errorText = await response.text();
       throw new Error(`API error ${response.status}: ${errorText}`);
     }
-
     if (!response.body) {
       throw new Error("No response body");
     }
-
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -120,7 +119,7 @@ export class ApiClient implements vscode.Disposable {
         if (done) {
           break;
         }
-
+ 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";

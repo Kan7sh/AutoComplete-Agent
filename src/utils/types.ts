@@ -1,3 +1,4 @@
+import * as vscode from 'vscode';
 export interface ChatStreamChunk{
     id:string,
     object:string,
@@ -11,7 +12,17 @@ export interface ChatStreamChunk{
 }>
 }
 
+export interface ReplacementEdit{
+    insertText:string,
+    startPosition:vscode.Position;
+}
+
 export interface ChatMessage{
     role:'system'|'user'|'assistant';
     content:string
+}
+
+export interface PendingCompletion{
+    documentUri:string,
+    edit:ReplacementEdit;
 }

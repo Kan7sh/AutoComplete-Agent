@@ -35,7 +35,7 @@ class ApiClient {
             return "fireworks";
         return null;
     }
-    async complete(message) {
+    async complete(messages) {
         const provider = this.getActiveProvider();
         if (!provider) {
             throw new Error("No API key is configured");
@@ -48,12 +48,12 @@ class ApiClient {
         const model = providerConfig.getModel();
         const body = {
             model,
-            message,
+            messages,
             max_tokens: maxTokens,
             stream: true,
             temperature: 0.1,
         };
-        this.log(`[${provider}] Request:model=${body.model}, max_tokkens=${maxTokens}`);
+        this.log(`[${provider}] Request:model=${body.model}, max_tokens=${maxTokens}`);
         return this.streamRequest(providerConfig.endpoint, body, providerConfig.getApiKey(), this.pendingRequest.signal);
     }
     cancel() {
@@ -64,12 +64,13 @@ class ApiClient {
     }
     async *streamRequest(endpoint, body, apiKey, signal) {
         const response = await fetch(endpoint, {
-            method: "POST",
+            method: 'POST',
             headers: {
-                Authorization: `Bearer ${apiKey}`,
+                "Authorization": `Bearer ${apiKey}`,
                 "Content-Type": "application/json",
             },
             body: JSON.stringify(body),
+            signal
         });
         if (!response.ok) {
             const errorText = await response.text();

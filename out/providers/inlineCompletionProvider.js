@@ -39,12 +39,14 @@ const apiClient_1 = require("../api/apiClient");
 class InineCompletionProvider {
     outputChannel;
     apiClient;
+    pendingCompletion = null;
     constructor(outputChannel) {
         this.outputChannel = outputChannel;
         this.apiClient = new apiClient_1.ApiClient(outputChannel);
     }
     async provideInlineCompletionItems(document, position, _context, token) {
         try {
+            this.handleExistingPendingCompletion();
             const prefix = document.getText(new vscode.Range(new vscode.Position(0, 0), position));
             this.log(`provideInlineCompletionItems called t ${position.line}:${position.character}`);
             let completion = "";
@@ -57,13 +59,32 @@ class InineCompletionProvider {
                     { role: "user", content: prefix },
                 ], token);
             }
-            catch (error) { }
+            catch (error) {
+                this.log(`API error ${error}`);
+                return null;
+            }
+            this.pendingCompletion = {
+                documentUri: document.uri.toString(),
+                edit: {
+                    startPosition: position,
+                    insertText: completion,
+                }
+            };
             const newItem = new vscode.InlineCompletionItem(completion);
             return { items: [newItem] };
         }
         catch (error) {
             this.log(`Unexpected error ${error}`);
             return null;
+        }
+    }
+    handleExistingPendingCompletion(document, position) {
+        if (!this.pendingCompletion) {
+            return undefined;
+        }
+        const pendingPosition = this.pendingCompletion.edit.startPosition;
+        const pendingUri = this.pendingCompletion.documentUri;
+        if (document.uri.toString() !== pendingUri) {
         }
     }
     async callCompletionAPI(messages, token) {
