@@ -44,7 +44,7 @@ function activate(context) {
     outputChannel.appendLine('Tab Completion extension activated');
     provider = new inlineCompletionProvider_1.InineCompletionProvider(outputChannel);
     const providerDisposable = vscode.languages.registerInlineCompletionItemProvider({ pattern: "**" }, provider);
-    context.subscriptions.push(providerDisposable);
+    context.subscriptions.push(providerDisposable, outputChannel);
 }
 function deactivate() { }
 //# sourceMappingURL=extension.js.map

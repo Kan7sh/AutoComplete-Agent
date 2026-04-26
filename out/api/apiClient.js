@@ -121,7 +121,7 @@ class ApiClient {
         this.outputChannel.appendLine(`[ApiClient] ${message}`);
     }
     dispose() {
-        throw new Error("Method not implemented.");
+        this.cancel();
     }
 }
 exports.ApiClient = ApiClient;

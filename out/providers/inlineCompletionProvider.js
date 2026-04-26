@@ -46,9 +46,16 @@ class InineCompletionProvider {
     }
     async provideInlineCompletionItems(document, position, _context, token) {
         try {
-            this.handleExistingPendingCompletion();
-            const prefix = document.getText(new vscode.Range(new vscode.Position(0, 0), position));
             this.log(`provideInlineCompletionItems called t ${position.line}:${position.character}`);
+            const pendingCompletionResult = this.handleExistingPendingCompletion(document, position);
+            if (pendingCompletionResult !== undefined) {
+                return pendingCompletionResult;
+            }
+            const prefix = document.getText(new vscode.Range(new vscode.Position(0, 0), position));
+            if (token.isCancellationRequested) {
+                this.log("Request cancelled");
+                return null;
+            }
             let completion = "";
             try {
                 completion = await this.callCompletionAPI([
@@ -68,15 +75,18 @@ class InineCompletionProvider {
                 edit: {
                     startPosition: position,
                     insertText: completion,
-                }
+                },
             };
-            const newItem = new vscode.InlineCompletionItem(completion);
-            return { items: [newItem] };
+            return this.createInlineCompletionList(completion);
         }
         catch (error) {
             this.log(`Unexpected error ${error}`);
             return null;
         }
+    }
+    createInlineCompletionList(text, range) {
+        const newItem = new vscode.InlineCompletionItem(text, range);
+        return { items: [newItem] };
     }
     handleExistingPendingCompletion(document, position) {
         if (!this.pendingCompletion) {
@@ -85,7 +95,21 @@ class InineCompletionProvider {
         const pendingPosition = this.pendingCompletion.edit.startPosition;
         const pendingUri = this.pendingCompletion.documentUri;
         if (document.uri.toString() !== pendingUri) {
+            this.clearPendingCompletion();
+            return undefined;
         }
+        if (position.line !== pendingPosition.line) {
+            this.clearPendingCompletion();
+            return undefined;
+        }
+        if (position.character === pendingPosition.character) {
+            this.createInlineCompletionList(this.pendingCompletion.edit.insertText);
+        }
+        this.clearPendingCompletion();
+        return undefined;
+    }
+    clearPendingCompletion() {
+        this.pendingCompletion = null;
     }
     async callCompletionAPI(messages, token) {
         let result = "";
