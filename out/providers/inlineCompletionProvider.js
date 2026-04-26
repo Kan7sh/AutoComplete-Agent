@@ -40,6 +40,9 @@ class InineCompletionProvider {
     outputChannel;
     apiClient;
     pendingCompletion = null;
+    lastCompletionText = "";
+    lastCompeltionPosition = null;
+    lastCompletionUri = null;
     constructor(outputChannel) {
         this.outputChannel = outputChannel;
         this.apiClient = new apiClient_1.ApiClient(outputChannel);
@@ -70,23 +73,59 @@ class InineCompletionProvider {
                 this.log(`API error ${error}`);
                 return null;
             }
-            this.pendingCompletion = {
-                documentUri: document.uri.toString(),
-                edit: {
-                    startPosition: position,
-                    insertText: completion,
-                },
+            const edit = {
+                insertText: completion,
+                startPosition: position,
             };
-            return this.createInlineCompletionList(completion);
+            return this.activateCompletion(edit, document);
         }
         catch (error) {
             this.log(`Unexpected error ${error}`);
             return null;
         }
     }
+    activateCompletion(edit, document) {
+        this.lastCompletionText = edit.insertText;
+        this.lastCompeltionPosition = edit.startPosition;
+        this.lastCompletionUri = document.uri.toString();
+        this.pendingCompletion = {
+            documentUri: document.uri.toString(),
+            edit: edit,
+        };
+        return this.createInlineCompletionList(edit.insertText);
+    }
     createInlineCompletionList(text, range) {
         const newItem = new vscode.InlineCompletionItem(text, range);
         return { items: [newItem] };
+    }
+    tryContinuePrediction(document, position) {
+        if (!this.lastCompeltionPosition ||
+            !this.lastCompletionText ||
+            this.lastCompletionUri !== document.uri.toString()) {
+            return undefined;
+        }
+        const charsSinceCompletion = position.character - this.lastCompeltionPosition.character;
+        if (position.line !== this.lastCompeltionPosition.line ||
+            charsSinceCompletion <= 0) {
+            return undefined;
+        }
+        const typedText = document.getText(new vscode.Range(this.lastCompeltionPosition, position));
+        if (charsSinceCompletion <= this.lastCompletionText.length &&
+            this.lastCompletionText.startsWith(typedText)) {
+            const remaing = this.lastCompletionText.slice(typedText.length);
+            if (remaing) {
+                this.log(`Continuing prediction typed "${typedText}", remaing "${remaing}"`);
+                return this.createInlineCompletionList(remaing, new vscode.Range(position, position));
+            }
+            this.log("User completed entire prediction");
+            this.lastCompletionText = "";
+            this.lastCompeltionPosition = null;
+            return null;
+        }
+        this.log(`Divergence detected: expected ${this.lastCompletionText}, got ${typedText}`);
+        this.lastCompletionText = "";
+        this.lastCompeltionPosition = null;
+        return undefined;
     }
     handleExistingPendingCompletion(document, position) {
         if (!this.pendingCompletion) {
@@ -127,6 +166,17 @@ class InineCompletionProvider {
             this.log(`API Error: ${error}`);
         }
         return result;
+    }
+    cleanCompletionText(text) {
+        let cleaned = text.replace(/^```\w*\n?/, "").replace(/\n?```$/, "");
+        const explanationPattern = /\n\n(?:\/\/|\/\*|#|Note:|Explanation:)[\s\S]*$/;
+        cleaned = cleaned.replace(explanationPattern, "");
+        return cleaned.trimEnd();
+    }
+    createCompletionListFromCache(text, postition) {
+        const replaceRange = new vscode.Range(postition, postition);
+        const completionText = text;
+        return this.createInlineCompletionList(completionText, replaceRange);
     }
     log(message) {
         this.outputChannel.appendLine(`[Provider] ${message}`);

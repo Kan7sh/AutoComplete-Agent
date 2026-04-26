@@ -1,6 +1,10 @@
 import * as vscode from "vscode";
 import { ApiClient } from "../api/apiClient";
-import { ChatMessage, PendingCompletion } from "../utils/types";
+import {
+  ChatMessage,
+  PendingCompletion,
+  ReplacementEdit,
+} from "../utils/types";
 
 export class InineCompletionProvider
   implements vscode.InlineCompletionItemProvider
@@ -8,6 +12,9 @@ export class InineCompletionProvider
   private readonly outputChannel: vscode.OutputChannel;
   private readonly apiClient: ApiClient;
   private pendingCompletion: PendingCompletion | null = null;
+  private lastCompletionText = "";
+  private lastCompeltionPosition: vscode.Position | null = null;
+  private lastCompletionUri: string | null = null;
 
   constructor(outputChannel: vscode.OutputChannel) {
     this.outputChannel = outputChannel;
@@ -36,7 +43,7 @@ export class InineCompletionProvider
         new vscode.Range(new vscode.Position(0, 0), position),
       );
 
-      if(token.isCancellationRequested){
+      if (token.isCancellationRequested) {
         this.log("Request cancelled");
         return null;
       }
@@ -58,19 +65,29 @@ export class InineCompletionProvider
         this.log(`API error ${error}`);
         return null;
       }
-
-      this.pendingCompletion = {
-        documentUri: document.uri.toString(),
-        edit: {
-          startPosition: position,
-          insertText: completion,
-        },
+      const edit: ReplacementEdit = {
+        insertText: completion,
+        startPosition: position,
       };
-      return this.createInlineCompletionList(completion);
+      return this.activateCompletion(edit, document);
     } catch (error) {
       this.log(`Unexpected error ${error}`);
       return null;
     }
+  }
+
+  private activateCompletion(
+    edit: ReplacementEdit,
+    document: vscode.TextDocument,
+  ): vscode.InlineCompletionList {
+    this.lastCompletionText = edit.insertText;
+    this.lastCompeltionPosition = edit.startPosition;
+    this.lastCompletionUri = document.uri.toString();
+    this.pendingCompletion = {
+      documentUri: document.uri.toString(),
+      edit: edit,
+    };
+    return this.createInlineCompletionList(edit.insertText);
   }
 
   private createInlineCompletionList(
@@ -79,6 +96,56 @@ export class InineCompletionProvider
   ): vscode.InlineCompletionList {
     const newItem = new vscode.InlineCompletionItem(text, range);
     return { items: [newItem] };
+  }
+
+  private tryContinuePrediction(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+  ): vscode.InlineCompletionList | null | undefined {
+    if (
+      !this.lastCompeltionPosition ||
+      !this.lastCompletionText ||
+      this.lastCompletionUri !== document.uri.toString()
+    ) {
+      return undefined;
+    }
+    const charsSinceCompletion =
+      position.character - this.lastCompeltionPosition.character;
+    if (
+      position.line !== this.lastCompeltionPosition.line ||
+      charsSinceCompletion <= 0
+    ) {
+      return undefined;
+    }
+
+    const typedText = document.getText(
+      new vscode.Range(this.lastCompeltionPosition, position),
+    );
+    if (
+      charsSinceCompletion <= this.lastCompletionText.length &&
+      this.lastCompletionText.startsWith(typedText)
+    ) {
+      const remaing = this.lastCompletionText.slice(typedText.length);
+      if (remaing) {
+        this.log(
+          `Continuing prediction typed "${typedText}", remaing "${remaing}"`,
+        );
+        return this.createInlineCompletionList(
+          remaing,
+          new vscode.Range(position, position),
+        );
+      }
+      this.log("User completed entire prediction");
+      this.lastCompletionText = "";
+      this.lastCompeltionPosition = null;
+      return null;
+    }
+    this.log(
+      `Divergence detected: expected ${this.lastCompletionText}, got ${typedText}`,
+    );
+    this.lastCompletionText = "";
+    this.lastCompeltionPosition = null;
+    return undefined;
   }
 
   private handleExistingPendingCompletion(
@@ -134,6 +201,22 @@ export class InineCompletionProvider
     }
 
     return result;
+  }
+
+  private cleanCompletionText(text: string): string {
+    let cleaned = text.replace(/^```\w*\n?/, "").replace(/\n?```$/, "");
+    const explanationPattern = /\n\n(?:\/\/|\/\*|#|Note:|Explanation:)[\s\S]*$/;
+    cleaned = cleaned.replace(explanationPattern, "");
+    return cleaned.trimEnd();
+  }
+
+  private createCompletionListFromCache(
+    text: string,
+    postition: vscode.Position,
+  ) {
+    const replaceRange = new vscode.Range(postition, postition);
+    const completionText = text;
+    return this.createInlineCompletionList(completionText, replaceRange);
   }
 
   private log(message: string): void {
