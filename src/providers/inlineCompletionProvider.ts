@@ -39,6 +39,10 @@ export class InineCompletionProvider
         return pendingCompletionResult;
       }
 
+      const continuationResult = this.tryContinuePrediction(document,position,);
+      if(continuationResult!==undefined){
+        return continuationResult;
+      }
       const prefix = document.getText(
         new vscode.Range(new vscode.Position(0, 0), position),
       );

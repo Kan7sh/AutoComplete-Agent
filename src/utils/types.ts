@@ -26,3 +26,16 @@ export interface PendingCompletion{
     documentUri:string,
     edit:ReplacementEdit;
 }
+
+export type IntentType = 'added'|'pasted'|'edited'|'accepted'|'rejected';
+
+export interface PendingIntent{
+    type:IntentType;
+    filePath:string;
+    originalContent:Map<number,string>;
+    currentContent:Map<number,string>;
+    startTime:number;
+    lastActivityTime:number;
+    affectedLines:Set<number>;
+
+}
