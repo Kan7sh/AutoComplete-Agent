@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { IntentEntry, IntentType, PendingIntent } from "../utils/types";
-
+import * as crypto from 'crypto';
 export class IntentTracker implements vscode.Disposable {
   private disposables: vscode.Disposable[] = [];
   private lastDocumentVersion: Map<string, number> = new Map();
@@ -13,6 +13,14 @@ export class IntentTracker implements vscode.Disposable {
     this.registerListners();
   }
 
+  computeHash():string{
+    const content = this.buffer.map(
+      e=>`${e.filePath}:${e.timestamp}:${e.type}:${e.content}`
+    ).join("|");
+
+    return crypto.createHash('md5').update(content).digest('hex').slice(0,16);
+  }
+
   private registerListners(): void {
     this.disposables.push(
       vscode.workspace.onDidChangeTextDocument((e) => {
@@ -22,12 +30,21 @@ export class IntentTracker implements vscode.Disposable {
 
     this.disposables.push(
       vscode.window.onDidChangeActiveTextEditor((editor) => {
-        this.handleActiveEditortChange(editor);
+        this.handleActiveEditorChange(editor);
       }),
     );
   }
 
-  private handleActiveEditortChange(editor: vscode.TextEditor | undefined) {}
+  private handleActiveEditorChange(editor: vscode.TextEditor | undefined) {
+
+    if(!this.pendingIntent){
+      return;
+    }
+
+    if(!editor||editor.document.uri.fsPath!==this.pendingIntent.filePath){
+      this.finalizeIntent();
+    }
+  }
 
   private handleDocumentChange(event: vscode.TextDocumentChangeEvent): void {
     const document = event.document;
@@ -278,5 +295,9 @@ export class IntentTracker implements vscode.Disposable {
     return null;
   }
 
-  dispose() {}
+  dispose() {
+    this.finalizeIntent();
+    this.disposables.forEach(d=>d.dispose());
+    this.clearFlushTimeout();
+  }
 }

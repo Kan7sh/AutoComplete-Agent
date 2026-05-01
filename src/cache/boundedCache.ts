@@ -1,0 +1,143 @@
+interface CacheEntry<V> {
+  value: V;
+  expiresAt: number | null;
+  groupKey: string | null;
+  lassAccessed: number;
+  accessCount: number;
+}
+
+export function buildCacheKey(...parts: Array<string|number>):string{
+    let key = '';
+    for(const part of parts){
+        const typePrefix = typeof part ==='number'?'n':'s';
+        const value = String(part);
+        key+=`${typePrefix}${value.length}:${value}|`;
+    }
+    return key;
+}
+
+export class BoundedCache<V> {
+  private cache: Map<string, CacheEntry<V>> = new Map();
+  private groupIndex: Map<string, Set<string>> = new Map();
+
+  constructor(private readonly maxSize: number) {
+    if (maxSize < 1) {
+      throw new Error("maxSize must be atleast 1");
+    }
+  }
+
+  invalidateGroup(groupKey:string):number{
+    const keys = this.groupIndex.get(groupKey);
+    let count = 0;
+    if(!keys){
+      return 0;
+    }
+
+    for(const key of keys){
+      if(this.cache.delete(key)){
+        count++;
+      }
+    }
+
+    this.groupIndex.delete(groupKey);
+    return count;
+  }
+
+  get(key: string): V | undefined {
+    const entry = this.cache.get(key);
+    const now = Date.now();
+    if (!entry) {
+      return undefined;
+    }
+
+    if (entry.expiresAt !== null && now > entry.expiresAt) {
+        this.deleteEntry(key,entry);
+        return undefined;
+    }
+
+    entry.lassAccessed = Date.now();
+    entry.accessCount++;
+    return entry.value;
+  }
+
+  set(
+    key: string,
+    value: V,
+    options?: { ttlMs?: number | null; groupKey?: string | null },
+  ): void {
+    const exisiting = this.cache.get(key);
+    const ttls = options?.ttlMs ?? null;
+    const groupKey = options?.groupKey ?? null;
+
+    const now = Date.now();
+    if (exisiting) {
+      this.deleteEntry(key, exisiting);
+    }
+
+    while (this.cache.size >= this.maxSize) {
+      this.evictLeastUsed();
+    }
+
+    const entry: CacheEntry<V> = {
+      value,
+      expiresAt: ttls !== null ? now + ttls : null,
+      lassAccessed: now,
+      accessCount: 1,
+      groupKey,
+    };
+    this.cache.set(key, entry);
+    if (groupKey !== null) {
+      let keys = this.groupIndex.get(groupKey);
+      if (!keys) {
+        keys = new Set();
+        this.groupIndex.set(groupKey, keys);
+      }
+      keys.add(key);
+    }
+  }
+
+  private evictLeastUsed(): void {
+    const now = Date.now();
+    let lowestScore = Infinity;
+    let evictKey: string | null = null;
+    for (const [key, entry] of this.cache) {
+      if (entry.expiresAt !== null && now > entry.expiresAt) {
+        this.deleteEntry(key, entry);
+        return;
+      }
+      const ageSeconds = Math.max(1, now - entry.lassAccessed) / 1000;
+      const score = entry.accessCount / ageSeconds;
+
+      if (score < lowestScore) {
+        lowestScore = score;
+        evictKey = key;
+      }
+    }
+
+    if (evictKey !== null) {
+      const entry = this.cache.get(evictKey);
+      if (entry) {
+        this.deleteEntry(evictKey, entry);
+      }
+    }
+  }
+
+  private deleteEntry(key: string, entry: CacheEntry<V>): void {
+    this.cache.delete(key);
+    if (entry.groupKey !== null) {
+      const keys = this.groupIndex.get(entry.groupKey);
+
+      if (keys) {
+        keys.delete(key);
+        if (keys.size === 0) {
+          this.groupIndex.delete(entry.groupKey);
+        }
+      }
+    }
+  }
+
+   clear():void{
+    this.cache.clear();
+    this.groupIndex.clear();
+   }
+}

@@ -7,6 +7,8 @@ export interface TabCompletionConfig {
 
   model: string;
   maxTokens: number;
+  completionCacheMaxEntries: number;
+  completionCacheTtlMs: number;
 }
 
 const DEFAULTS: TabCompletionConfig = {
@@ -15,6 +17,8 @@ const DEFAULTS: TabCompletionConfig = {
   openrouterApiKey: "",
   model: "qwen/qwen3-32b",
   maxTokens: 500,
+  completionCacheMaxEntries: 100,
+  completionCacheTtlMs: 30000,
 };
 
 export class ConfigurationService implements vscode.Disposable {
@@ -71,6 +75,12 @@ export class ConfigurationService implements vscode.Disposable {
   get maxTokens(): number {
     return this.cachedConfig.maxTokens;
   }
+    get completionCacheMaxEntries(): number {
+    return this.cachedConfig.completionCacheMaxEntries;
+  }
+    get completionCacheTtlMs(): number {
+    return this.cachedConfig.completionCacheTtlMs;
+  }
 
   onConfigChange(
     callback: (config: TabCompletionConfig) => void,
@@ -93,6 +103,15 @@ export class ConfigurationService implements vscode.Disposable {
       ),
       maxTokens: config.get<number>("maxTokens", DEFAULTS.maxTokens),
       model: config.get<string>("model", DEFAULTS.model),
+      completionCacheMaxEntries: config.get<number>(
+        "completionCacheMaxEntries",
+        DEFAULTS.completionCacheMaxEntries,
+      ),
+
+      completionCacheTtlMs: config.get<number>(
+        "completionCacheTtlMs",
+        DEFAULTS.completionCacheTtlMs,
+      ),
     };
   }
 
