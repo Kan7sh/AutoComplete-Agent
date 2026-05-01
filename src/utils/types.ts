@@ -39,3 +39,13 @@ export interface PendingIntent{
     affectedLines:Set<number>;
 
 }
+
+export interface IntentEntry{
+    id:string,
+    type:IntentType,
+    filePath:string,
+    lineRange:{start:number,end:number},
+    content:string,
+    timestamp:number,
+    suggestionPreview?:string
+}
