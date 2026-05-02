@@ -9,6 +9,7 @@ export interface TabCompletionConfig {
   maxTokens: number;
   completionCacheMaxEntries: number;
   completionCacheTtlMs: number;
+  lspCacheMaxEntries: number;
 }
 
 const DEFAULTS: TabCompletionConfig = {
@@ -19,6 +20,7 @@ const DEFAULTS: TabCompletionConfig = {
   maxTokens: 500,
   completionCacheMaxEntries: 100,
   completionCacheTtlMs: 30000,
+  lspCacheMaxEntries: 100,
 };
 
 export class ConfigurationService implements vscode.Disposable {
@@ -75,11 +77,15 @@ export class ConfigurationService implements vscode.Disposable {
   get maxTokens(): number {
     return this.cachedConfig.maxTokens;
   }
-    get completionCacheMaxEntries(): number {
+  get completionCacheMaxEntries(): number {
     return this.cachedConfig.completionCacheMaxEntries;
   }
-    get completionCacheTtlMs(): number {
+  get completionCacheTtlMs(): number {
     return this.cachedConfig.completionCacheTtlMs;
+  }
+
+  get lspCacheMaxEntries(): number {
+    return this.cachedConfig.lspCacheMaxEntries;
   }
 
   onConfigChange(
@@ -111,6 +117,11 @@ export class ConfigurationService implements vscode.Disposable {
       completionCacheTtlMs: config.get<number>(
         "completionCacheTtlMs",
         DEFAULTS.completionCacheTtlMs,
+      ),
+
+      lspCacheMaxEntries: config.get<number>(
+        "lspCacheMaxEntries",
+        DEFAULTS.lspCacheMaxEntries,
       ),
     };
   }

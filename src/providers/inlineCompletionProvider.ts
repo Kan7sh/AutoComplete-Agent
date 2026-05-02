@@ -63,7 +63,10 @@ export class InineCompletionProvider
       if (continuationResult !== undefined) {
         return continuationResult;
       }
-      const prefix = this.contextGatherer.gatherContext(document, position);
+      const prefix = await this.contextGatherer.gatherContext(
+        document,
+        position,
+      );
 
       if (token.isCancellationRequested) {
         this.log("Request cancelled");
