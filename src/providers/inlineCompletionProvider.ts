@@ -7,6 +7,7 @@ import {
 } from "../utils/types";
 import { CompletionCache } from "../cache/completionCache";
 import { IntentTracker } from "../services/intentTracker";
+import { ContextGatherer } from "../services/contextGatherer";
 
 export class InineCompletionProvider
   implements vscode.InlineCompletionItemProvider
@@ -15,6 +16,7 @@ export class InineCompletionProvider
   private readonly apiClient: ApiClient;
   private readonly intentTracker: IntentTracker;
   private readonly completionCache: CompletionCache;
+  private readonly contextGatherer: ContextGatherer;
   private pendingCompletion: PendingCompletion | null = null;
   private lastCompletionText = "";
   private lastCompeltionPosition: vscode.Position | null = null;
@@ -25,6 +27,7 @@ export class InineCompletionProvider
     this.apiClient = new ApiClient(outputChannel);
     this.intentTracker = new IntentTracker();
     this.completionCache = new CompletionCache();
+    this.contextGatherer = new ContextGatherer(this.intentTracker);
   }
   async provideInlineCompletionItems(
     document: vscode.TextDocument,
@@ -60,9 +63,7 @@ export class InineCompletionProvider
       if (continuationResult !== undefined) {
         return continuationResult;
       }
-      const prefix = document.getText(
-        new vscode.Range(new vscode.Position(0, 0), position),
-      );
+      const prefix = this.contextGatherer.gatherContext(document, position);
 
       if (token.isCancellationRequested) {
         this.log("Request cancelled");
@@ -115,8 +116,7 @@ export class InineCompletionProvider
       return undefined;
     }
 
-        this.log(`Cache hit ${cachedEdit}`);
-
+    this.log(`Cache hit ${cachedEdit}`);
 
     return this.activateCompletion(cachedEdit, document);
   }
