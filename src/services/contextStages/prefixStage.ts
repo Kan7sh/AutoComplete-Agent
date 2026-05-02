@@ -1,15 +1,20 @@
 import * as vscode from "vscode";
 import { EnclosingScope } from "../../utils/types";
 import { LSPService } from "../lspService";
-import { extractIdentifiers } from "../../utils/languageUtils";
+import {
+  extractIdentifiers,
+  getTruncationMarker,
+} from "../../utils/languageUtils";
 import {
   findImportLineSpans,
   parseImportBindings,
 } from "../../utils/importAnalysis";
+import { LocalDependencyResolver } from "./localDependencyResolver";
 export class PrefixStage {
-  constructor(
-    private readonly lspService: Pick<LSPService, "getDocumentSymbols">,
-  ) {}
+  private readonly localDependencyResolver: LocalDependencyResolver;
+  constructor(private readonly lspService: LSPService) {
+    this.localDependencyResolver = new LocalDependencyResolver(this.lspService);
+  }
 
   async buildPrefix(document: vscode.TextDocument, position: vscode.Position) {
     if (position.line < 150) {
@@ -20,6 +25,156 @@ export class PrefixStage {
     if (!scopes.enclosingFunction) {
       return this.buildSimplifiedPrefix(document, position, 150);
     }
+
+    const functionStartLine = scopes.enclosingFunction.range.start.line;
+    const linesFromFunctionStart = position.line - functionStartLine >= 150;
+
+    return this.buildScopedPrefix(
+      document,
+      position,
+      scopes,
+      linesFromFunctionStart,
+    );
+  }
+
+  private async buildScopedPrefix(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    scopes: EnclosingScope,
+    isLargeFunction: boolean,
+  ): Promise<string> {
+    const cursorLine = position.line;
+    const functionStartLine =
+      scopes.enclosingFunction?.range.start.line ?? cursorLine;
+    const classHeaderLines = this.collectClassHeaderLines(
+      document,
+      scopes,
+      functionStartLine,
+    );
+
+    if (!isLargeFunction) {
+      const functionLines = this.collectLinesToCursor(
+        document,
+        functionStartLine,
+        position,
+      );
+
+      const usedIdentifiers = extractIdentifiers(
+        [...classHeaderLines, ...functionLines].join("\n"),
+        document.languageId,
+      );
+
+      const usedImports = this.getUsedImports(document, usedIdentifiers);
+
+      const sameFileDeps =
+        await this.localDependencyResolver.collectSameFileDependencies(
+          document,
+          scopes,
+          usedIdentifiers,
+          position,
+        );
+
+      return this.assemblePrefixParts(
+        usedImports,
+        sameFileDeps,
+        classHeaderLines,
+        functionLines,
+      ).join("\n");
+    }
+
+    const functionSetupEnd = Math.min(functionStartLine + 30, cursorLine);
+    const recentContextStart = Math.max(functionSetupEnd + 1, cursorLine - 100);
+
+    const functionSetupLines = this.collectLinesToCursor(
+      document,
+      functionStartLine,
+      new vscode.Position(functionSetupEnd + 1, 0),
+    );
+    const recentContextLines = this.collectLinesToCursor(
+      document,
+      recentContextStart,
+      new vscode.Position(position.line + 1, 0),
+    );
+
+    const usedIdentifiers = extractIdentifiers(
+      [...classHeaderLines, ...functionSetupLines, recentContextLines].join(
+        "\n",
+      ),
+      document.languageId,
+    );
+
+    const usedImports = this.getUsedImports(document, usedIdentifiers);
+
+    const sameFileDeps =
+      await this.localDependencyResolver.collectSameFileDependencies(
+        document,
+        scopes,
+        usedIdentifiers,
+        position,
+      );
+
+    const output = this.assemblePrefixParts(
+      usedImports,
+      sameFileDeps,
+      classHeaderLines,
+      functionSetupLines,
+    );
+
+    if (recentContextLines.length > 0) {
+      const skippedLines = recentContextStart - functionSetupEnd;
+
+      if (skippedLines > 0) {
+        output.push(getTruncationMarker(document.languageId, skippedLines));
+      }
+      output.push(...recentContextLines);
+    }
+
+    return output.join("\n");
+  }
+
+  private collectClassHeaderLines(
+    document: vscode.TextDocument,
+    scopes: EnclosingScope,
+    functionStartLine: number,
+  ): string[] {
+    const classStartLine = scopes.enclosingClass?.range.start.line;
+    if (classStartLine === undefined || classStartLine >= functionStartLine) {
+      return [];
+    }
+
+    const classHeaderEnd = this.findClassHeaderEnd(document, classStartLine);
+
+    return this.collectLinesToCursor(
+      document,
+      classStartLine,
+      new vscode.Position(classHeaderEnd + 1, 0),
+    );
+  }
+
+  private findClassHeaderEnd(
+    document: vscode.TextDocument,
+    classStartLine: number,
+  ): number {
+    if (document.languageId === "python") {
+      for (let i = classStartLine; i < document.lineCount; i++) {
+        if (document.lineAt(i).text.includes(":")) {
+          return i;
+        }
+      }
+      return classStartLine;
+    }
+
+    for (
+      let i = classStartLine;
+      i < Math.min(classStartLine + 10, document.lineCount);
+      i++
+    ) {
+      if (document.lineAt(i).text.includes("{")) {
+        return i;
+      }
+    }
+
+    return classStartLine;
   }
 
   private buildSimplifiedPrefix(
