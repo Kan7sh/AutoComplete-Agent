@@ -1,13 +1,16 @@
 import * as vscode from "vscode";
 import { IntentTracker } from "./intentTracker";
 import { PrefixStage } from "./contextStages/prefixStage";
+import { LSPService } from "./lspService";
 export class ContextGatherer implements vscode.Disposable {
   private readonly intentTracker: IntentTracker;
   private readonly prefixState: PrefixStage;
+  private readonly lspService: LSPService;
 
   constructor(intentTracker: IntentTracker) {
     this.intentTracker = intentTracker;
-    this.prefixState = new PrefixStage();
+    this.lspService = new LSPService();
+    this.prefixState = new PrefixStage(this.lspService);
   }
 
   async gatherContext(

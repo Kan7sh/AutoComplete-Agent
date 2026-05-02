@@ -1,9 +1,171 @@
 import * as vscode from "vscode";
+import { EnclosingScope } from "../../utils/types";
+import { LSPService } from "../lspService";
+import { extractIdentifiers } from "../../utils/languageUtils";
+import {
+  findImportLineSpans,
+  parseImportBindings,
+} from "../../utils/importAnalysis";
 export class PrefixStage {
+  constructor(
+    private readonly lspService: Pick<LSPService, "getDocumentSymbols">,
+  ) {}
+
   async buildPrefix(document: vscode.TextDocument, position: vscode.Position) {
     if (position.line < 150) {
       return this.getVerbatimPrefix(document, position);
     }
+
+    const scopes = await this.getEnclosingScopes(document, position);
+    if (!scopes.enclosingFunction) {
+      return this.buildSimplifiedPrefix(document, position, 150);
+    }
+  }
+
+  private buildSimplifiedPrefix(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    lineLimit: number,
+  ): string {
+    const cursorLine = position.line;
+    const startLine = Math.max(0, cursorLine - lineLimit);
+    const recentLines = this.collectLinesToCursor(
+      document,
+      startLine,
+      position,
+    );
+    const usedIdentifiers = extractIdentifiers(
+      recentLines.join("\n"),
+      document.languageId,
+    );
+
+    const usedImports = this.getUsedImports(document, usedIdentifiers);
+
+    return this.assemblePrefixParts(usedImports, [], [], recentLines).join(
+      "\n",
+    );
+  }
+
+  private assemblePrefixParts(
+    usedImports: string[],
+    sameFileDeps: string[],
+    classHeaderLines: string[],
+    primaryLines: string[],
+  ): string[] {
+    const output: string[] = [];
+
+    if (usedImports.length > 0) {
+      output.push(...usedImports);
+    }
+
+    if (sameFileDeps.length > 0) {
+      output.push(...sameFileDeps);
+    }
+
+    if (classHeaderLines.length > 0) {
+      output.push(...classHeaderLines);
+    }
+
+    if (primaryLines.length > 0) {
+      output.push(...primaryLines);
+    }
+
+    return output;
+  }
+
+  private getUsedImports(
+    document: vscode.TextDocument,
+    usedIdentifiers: Set<string>,
+  ): string[] {
+    const languageId = document.languageId;
+    const importSpans = findImportLineSpans(document.getText(), languageId);
+
+    if (importSpans.length === 0) {
+      return [];
+    }
+
+    const usedImports: string[] = [];
+
+    for (const span of importSpans) {
+      const importLines: string[] = [];
+      for (let i = span.start; i <= span.end && i < document.lineCount; i++) {
+        importLines.push(document.lineAt(i).text);
+      }
+      const importText = importLines.join("\n");
+
+      if (this.isAlwaysIncludedImportSpan(importLines, languageId)) {
+        usedImports.push(...importLines);
+        continue;
+      }
+
+      if (usedIdentifiers.size === 0) {
+        continue;
+      }
+
+      const bindings = parseImportBindings(importText, languageId);
+      const providedNames = Array.from(bindings.importedLocalNames);
+      const isUsed = providedNames.some((name) => usedIdentifiers.has(name));
+
+      if (isUsed) {
+        usedImports.push(...importLines);
+      }
+    }
+
+    return usedImports;
+  }
+  private isAlwaysIncludedImportSpan(
+    lines: string[],
+    languageId: string,
+  ): boolean {
+    if (languageId !== "go" && languageId !== "java") {
+      return false;
+    }
+    const firstNonEmpty = lines.find((line) => line.trim() !== "")?.trim();
+    return firstNonEmpty?.startsWith("package ") ?? false;
+  }
+
+  private async getEnclosingScopes(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+  ): Promise<EnclosingScope> {
+    const symbols = await this.lspService.getDocumentSymbols(document);
+    const symbolsByName = new Map<string, vscode.DocumentSymbol[]>();
+    let enclosingFunction: vscode.DocumentSymbol | null = null;
+    let enclosingClass: vscode.DocumentSymbol | null = null;
+
+    let funtionDepth = -1;
+    let classDepth = -1;
+
+    const findEnclosing = (syms: vscode.DocumentSymbol[], depth: number) => {
+      for (const symbol of syms) {
+        const exisitngSymbol = symbolsByName.get(symbol.name);
+        if (exisitngSymbol) {
+          exisitngSymbol.push(symbol);
+          return;
+        }
+        symbolsByName.set(symbol.name, [symbol]);
+
+        if (symbol.range.contains(position)) {
+          if (this.isFunctionSymbol(symbol.kind) && depth >= funtionDepth) {
+            enclosingFunction = symbol;
+            funtionDepth = depth;
+          }
+
+          if (this.isClassSymbol(symbol.kind) && depth >= classDepth) {
+            enclosingClass = symbol;
+            classDepth = depth;
+          }
+        }
+
+        if (symbol.children && symbol.children.length > 0) {
+          findEnclosing(symbol.children, depth + 1);
+        }
+      }
+    };
+
+    findEnclosing(symbols, 0);
+
+    return { enclosingFunction, enclosingClass, symbolsByName };
   }
 
   getVerbatimPrefix(
@@ -11,6 +173,23 @@ export class PrefixStage {
     position: vscode.Position,
   ): string {
     return this.collectLinesToCursor(document, 0, position).join("\n");
+  }
+
+  private isFunctionSymbol(kind: vscode.SymbolKind): boolean {
+    return [
+      vscode.SymbolKind.Function,
+      vscode.SymbolKind.Method,
+      vscode.SymbolKind.Constructor,
+    ].includes(kind);
+  }
+
+  private isClassSymbol(kind: vscode.SymbolKind): boolean {
+    return [
+      vscode.SymbolKind.Class,
+      vscode.SymbolKind.Interface,
+      vscode.SymbolKind.Struct,
+      vscode.SymbolKind.Enum,
+    ].includes(kind);
   }
 
   private collectLinesToCursor(
