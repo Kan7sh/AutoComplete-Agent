@@ -5,12 +5,16 @@ import {
   PendingCompletion,
   ReplacementEdit,
 } from "../utils/types";
+import { CompletionCache } from "../cache/completionCache";
+import { IntentTracker } from "../services/intentTracker";
 
 export class InineCompletionProvider
   implements vscode.InlineCompletionItemProvider
 {
   private readonly outputChannel: vscode.OutputChannel;
   private readonly apiClient: ApiClient;
+  private readonly intentTracker: IntentTracker;
+  private readonly completionCache: CompletionCache;
   private pendingCompletion: PendingCompletion | null = null;
   private lastCompletionText = "";
   private lastCompeltionPosition: vscode.Position | null = null;
@@ -19,6 +23,8 @@ export class InineCompletionProvider
   constructor(outputChannel: vscode.OutputChannel) {
     this.outputChannel = outputChannel;
     this.apiClient = new ApiClient(outputChannel);
+    this.intentTracker = new IntentTracker();
+    this.completionCache = new CompletionCache();
   }
   async provideInlineCompletionItems(
     document: vscode.TextDocument,
@@ -39,8 +45,19 @@ export class InineCompletionProvider
         return pendingCompletionResult;
       }
 
-      const continuationResult = this.tryContinuePrediction(document,position,);
-      if(continuationResult!==undefined){
+      const editHistoryHash = this.intentTracker.computeHash();
+
+      const cachedResult = this.tryCachedCompletion(
+        document,
+        position,
+        editHistoryHash,
+      );
+      if (cachedResult) {
+        return cachedResult;
+      }
+
+      const continuationResult = this.tryContinuePrediction(document, position);
+      if (continuationResult !== undefined) {
         return continuationResult;
       }
       const prefix = document.getText(
@@ -69,15 +86,39 @@ export class InineCompletionProvider
         this.log(`API error ${error}`);
         return null;
       }
+
       const edit: ReplacementEdit = {
         insertText: completion,
         startPosition: position,
       };
+
+      this.completionCache.set(document, position, editHistoryHash, edit);
+
       return this.activateCompletion(edit, document);
     } catch (error) {
       this.log(`Unexpected error ${error}`);
       return null;
     }
+  }
+
+  private tryCachedCompletion(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    editHistory: string,
+  ): vscode.InlineCompletionList | undefined {
+    const cachedEdit = this.completionCache.get(
+      document,
+      position,
+      editHistory,
+    );
+    if (!cachedEdit) {
+      return undefined;
+    }
+
+        this.log(`Cache hit ${cachedEdit}`);
+
+
+    return this.activateCompletion(cachedEdit, document);
   }
 
   private activateCompletion(
